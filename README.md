@@ -33,3 +33,16 @@ Elenco root Dropbox:
 python main.py list --path "" --limit 20
 ```
 
+## CI (GitHub Actions)
+
+La pipeline in `.github/workflows/ci.yml` esegue su push e pull request verso `main` e `development`:
+- `ruff check .`
+- compilazione rapida: `python -m py_compile auth.py main.py`
+
+Verifica locale rapida (opzionale prima del push):
+
+```bash
+pip install ruff
+ruff check .
+python -m py_compile auth.py main.py
+```
