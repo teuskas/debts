@@ -785,8 +785,13 @@ class DebtsDesktopApp(tk.Tk):
             ).grid(row=0, column=cidx, sticky="nsew")
 
         previous_total: float | None = None
+        last_paid_row_index = -1
+        for idx, (_, _, paid_flags_row, _) in enumerate(monthly_rows):
+            if any(bool(paid_flags_row.get(debt, False)) for debt in debts):
+                last_paid_row_index = idx
 
-        for ridx, (month_label, values_by_debt, paid_flags_by_debt, paid_amounts_by_debt) in enumerate(monthly_rows, start=1):
+        for row_index, (month_label, values_by_debt, paid_flags_by_debt, paid_amounts_by_debt) in enumerate(monthly_rows):
+            ridx = row_index + 1
             row_vals = [values_by_debt.get(d, 0.0) for d in debts]
             total = sum(row_vals)
 
@@ -813,7 +818,11 @@ class DebtsDesktopApp(tk.Tk):
                 cell_label.grid(row=ridx, column=cidx, sticky="nsew")
 
                 paid_amount_for_cell = max(0.0, paid_amounts_by_debt.get(debt, 0.0))
-                if paid_in_month and paid_amount_for_cell > 0:
+                is_first_debt_cell = cidx == 1
+                is_after_last_paid = row_index > last_paid_row_index
+                should_show_future_intermediate = is_after_last_paid and is_first_debt_cell
+
+                if (paid_in_month and paid_amount_for_cell > 0) or (should_show_future_intermediate and paid_amount_for_cell > 0):
                     reference_total = previous_total
                     if reference_total is None:
                         reference_total = total + sum(max(0.0, paid_amounts_by_debt.get(d, 0.0)) for d in debts)
@@ -1687,10 +1696,7 @@ def _extract_monthly_rimanenze(
 
         # Flag mese: pagato se esiste movimento positivo o cella marcata verde.
         row_flags = {debt: bool(month_paid_flags.get(debt, False)) for debt in debts}
-        row_paid_amounts = {
-            debt: month_bucket.get(debt, 0.0) if row_flags.get(debt, False) else 0.0
-            for debt in debts
-        }
+        row_paid_amounts = {debt: month_bucket.get(debt, 0.0) for debt in debts}
         label = month_label or monthly_labels.get(month_key, month_key)
         result.append((label, row_remaining, row_flags, row_paid_amounts))
 
@@ -1787,7 +1793,7 @@ def _extract_monthly_capital_rimanenze_from_dedicated_files(
 
             row_values[debt] = running_remaining_by_debt[debt]
             row_flags[debt] = bool(flags.get(mkey, False))
-            row_paid_amounts[debt] = month_capital if row_flags[debt] else 0.0
+            row_paid_amounts[debt] = month_capital
 
         result.append((mlabel, row_values, row_flags, row_paid_amounts))
 
