@@ -129,6 +129,7 @@ class DebtsDesktopApp(tk.Tk):
         self.platform_amounts_by_name: dict[str, float] = {name: 0.0 for name in PLATFORM_NAMES}
         self._capital_file_cache: dict[str, bytes] = {}
         self._platform_file_cache: dict[str, bytes] = {}
+        self._hover_tooltip: tk.Toplevel | None = None
 
         self.annual_year_var = tk.StringVar()
         self.future_year_var = tk.StringVar()
@@ -403,6 +404,34 @@ class DebtsDesktopApp(tk.Tk):
 
     def _on_rimanenze_filter_change(self, _event=None) -> None:
         self._refresh_rimanenze_view()
+
+    def _show_hover_tooltip(self, event, text: str) -> None:
+        self._hide_hover_tooltip()
+        tooltip = tk.Toplevel(self)
+        tooltip.wm_overrideredirect(True)
+        tooltip.configure(bg="#111827")
+        tk.Label(
+            tooltip,
+            text=text,
+            bg="#111827",
+            fg="#ffffff",
+            font=("Segoe UI", 9),
+            padx=8,
+            pady=4,
+        ).pack()
+
+        x = event.x_root + 12
+        y = event.y_root + 12
+        tooltip.wm_geometry(f"+{x}+{y}")
+        self._hover_tooltip = tooltip
+
+    def _hide_hover_tooltip(self, _event=None) -> None:
+        if self._hover_tooltip is not None:
+            try:
+                self._hover_tooltip.destroy()
+            except Exception:
+                pass
+            self._hover_tooltip = None
 
     def _set_controls_busy(self, busy: bool) -> None:
         self.annual_year_cb.configure(state="disabled" if busy or not self.sheet_names else "readonly")
@@ -687,6 +716,7 @@ class DebtsDesktopApp(tk.Tk):
         self.differences_table_body.grid_columnconfigure(2, weight=0, minsize=170)
 
     def _refresh_rimanenze_view(self) -> None:
+        self._hide_hover_tooltip()
         for child in self.rimanenze_table_body.winfo_children():
             child.destroy()
 
@@ -718,6 +748,8 @@ class DebtsDesktopApp(tk.Tk):
                 debt: max(0.0, TOTAL_AMOUNT_BY_TARGET[debt] - paid_totals.get(debt, 0.0))
                 for debt in debts
             }
+
+        current_paid_only_remaining = dict(initial_remaining) if scope == "Capitale" else {}
 
         # Per il Capitale usa i file dedicati RMQ/FCQ/FCAR (richiesta utente).
         if scope == "Capitale":
@@ -766,7 +798,7 @@ class DebtsDesktopApp(tk.Tk):
             for cidx, debt in enumerate(debts, start=1):
                 val = values_by_debt.get(debt, 0.0)
                 paid_in_month = bool(paid_flags_by_debt.get(debt, False))
-                tk.Label(
+                cell_label = tk.Label(
                     self.rimanenze_table_body,
                     text=_format_amount(val),
                     bg=FG_POSITIVE if paid_in_month else BG_TABLE,
@@ -777,7 +809,14 @@ class DebtsDesktopApp(tk.Tk):
                     padx=8,
                     pady=5,
                     anchor="e",
-                ).grid(row=ridx, column=cidx, sticky="nsew")
+                )
+                cell_label.grid(row=ridx, column=cidx, sticky="nsew")
+
+                if scope == "Capitale" and paid_in_month:
+                    paid_only_value = current_paid_only_remaining.get(debt, val)
+                    tooltip_text = f"Capitale attuale (solo rate pagate): {_format_amount(paid_only_value)}"
+                    cell_label.bind("<Enter>", lambda event, t=tooltip_text: self._show_hover_tooltip(event, t))
+                    cell_label.bind("<Leave>", self._hide_hover_tooltip)
 
             all_paid = all(bool(paid_flags_by_debt.get(debt, False)) for debt in debts)
             tk.Label(
