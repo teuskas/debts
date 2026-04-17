@@ -749,8 +749,6 @@ class DebtsDesktopApp(tk.Tk):
                 for debt in debts
             }
 
-        current_paid_only_remaining = dict(initial_remaining) if scope == "Capitale" else {}
-
         # Per il Capitale usa i file dedicati RMQ/FCQ/FCAR (richiesta utente).
         if scope == "Capitale":
             monthly_rows = _extract_monthly_capital_rimanenze_from_dedicated_files(
@@ -786,9 +784,14 @@ class DebtsDesktopApp(tk.Tk):
                 font=("Segoe UI", 10, "bold"), bd=1, relief="solid", padx=8, pady=5, anchor="center",
             ).grid(row=0, column=cidx, sticky="nsew")
 
-        for ridx, (month_label, values_by_debt, paid_flags_by_debt) in enumerate(monthly_rows, start=1):
+        previous_total: float | None = None
+
+        for ridx, (month_label, values_by_debt, paid_flags_by_debt, paid_amounts_by_debt) in enumerate(monthly_rows, start=1):
             row_vals = [values_by_debt.get(d, 0.0) for d in debts]
             total = sum(row_vals)
+            mixed_paid_status = any(bool(paid_flags_by_debt.get(debt, False)) for debt in debts) and not all(
+                bool(paid_flags_by_debt.get(debt, False)) for debt in debts
+            )
 
             tk.Label(
                 self.rimanenze_table_body, text=month_label, bg=BG_TABLE, fg=FG,
@@ -812,9 +815,14 @@ class DebtsDesktopApp(tk.Tk):
                 )
                 cell_label.grid(row=ridx, column=cidx, sticky="nsew")
 
-                if scope == "Capitale" and paid_in_month:
-                    paid_only_value = current_paid_only_remaining.get(debt, val)
-                    tooltip_text = f"Capitale attuale (solo rate pagate): {_format_amount(paid_only_value)}"
+                paid_amount_for_cell = max(0.0, paid_amounts_by_debt.get(debt, 0.0))
+                if paid_in_month and mixed_paid_status and previous_total is not None and paid_amount_for_cell > 0:
+                    tooltip_value = max(0.0, previous_total - paid_amount_for_cell)
+                    paid_label = "capitale" if scope == "Capitale" else "totale"
+                    tooltip_text = (
+                        f"Totale mese precedente - {paid_label} pagato: "
+                        f"{_format_amount(previous_total)} - {_format_amount(paid_amount_for_cell)} = {_format_amount(tooltip_value)}"
+                    )
                     cell_label.bind("<Enter>", lambda event, t=tooltip_text: self._show_hover_tooltip(event, t))
                     cell_label.bind("<Leave>", self._hide_hover_tooltip)
 
@@ -831,6 +839,8 @@ class DebtsDesktopApp(tk.Tk):
                 pady=5,
                 anchor="e",
             ).grid(row=ridx, column=col_count - 1, sticky="nsew")
+
+            previous_total = total
 
         self.rimanenze_table_body.grid_columnconfigure(0, weight=0, minsize=100)
         for cidx in range(1, col_count):
@@ -1544,7 +1554,7 @@ def _extract_monthly_rimanenze(
     initial_remaining: dict[str, float],
     year: str,
     fill_full_year: bool = False,
-) -> list[tuple[str, dict[str, float], dict[str, bool]]]:
+) -> list[tuple[str, dict[str, float], dict[str, bool], dict[str, float]]]:
     """Estrae rimanenze mensili e flag pagamento per i debiti selezionati.
     Ritorna lista di (label_mese, {debt: remaining_balance}, {debt: paid_in_month}).
     """
@@ -1653,7 +1663,7 @@ def _extract_monthly_rimanenze(
         return []
 
     remaining: dict[str, float] = {d: initial_remaining.get(d, 0.0) for d in debts}
-    result: list[tuple[str, dict[str, float], dict[str, bool]]] = []
+    result: list[tuple[str, dict[str, float], dict[str, bool], dict[str, float]]] = []
 
     if fill_full_year:
         month_sequence = _build_month_sequence_for_year(year)
@@ -1681,8 +1691,12 @@ def _extract_monthly_rimanenze(
 
         # Flag mese: pagato se esiste movimento positivo o cella marcata verde.
         row_flags = {debt: bool(month_paid_flags.get(debt, False)) for debt in debts}
+        row_paid_amounts = {
+            debt: month_bucket.get(debt, 0.0) if row_flags.get(debt, False) else 0.0
+            for debt in debts
+        }
         label = month_label or monthly_labels.get(month_key, month_key)
-        result.append((label, row_remaining, row_flags))
+        result.append((label, row_remaining, row_flags, row_paid_amounts))
 
     return result
 
@@ -1699,7 +1713,7 @@ def _extract_monthly_capital_rimanenze_from_dedicated_files(
     year: str,
     initial_remaining: dict[str, float],
     capital_file_cache: dict[str, bytes],
-) -> list[tuple[str, dict[str, float], dict[str, bool]]]:
+) -> list[tuple[str, dict[str, float], dict[str, bool], dict[str, float]]]:
     month_sequence = _build_month_sequence_for_year(year)
     if not month_sequence:
         return []
@@ -1727,7 +1741,7 @@ def _extract_monthly_capital_rimanenze_from_dedicated_files(
     # Ricostruisce la rimanenza mese per mese partendo dalla rimanenza attuale.
     # Le cifre decrescono sempre in base al piano capitale mensile; il colore verde
     # resta legato solo ai mesi realmente pagati (celle verdi nei file dedicati).
-    result: list[tuple[str, dict[str, float], dict[str, bool]]] = []
+    result: list[tuple[str, dict[str, float], dict[str, bool], dict[str, float]]] = []
     running_remaining_by_debt: dict[str, float] = {}
 
     for debt in debts:
@@ -1766,6 +1780,7 @@ def _extract_monthly_capital_rimanenze_from_dedicated_files(
     for mkey, mlabel in month_sequence:
         row_values: dict[str, float] = {}
         row_flags: dict[str, bool] = {}
+        row_paid_amounts: dict[str, float] = {}
         for debt in debts:
             amounts = paid_amounts_by_debt.get(debt, {})
             flags = paid_flags_by_debt.get(debt, {})
@@ -1776,8 +1791,9 @@ def _extract_monthly_capital_rimanenze_from_dedicated_files(
 
             row_values[debt] = running_remaining_by_debt[debt]
             row_flags[debt] = bool(flags.get(mkey, False))
+            row_paid_amounts[debt] = month_capital if row_flags[debt] else 0.0
 
-        result.append((mlabel, row_values, row_flags))
+        result.append((mlabel, row_values, row_flags, row_paid_amounts))
 
     return result
 
