@@ -789,9 +789,6 @@ class DebtsDesktopApp(tk.Tk):
         for ridx, (month_label, values_by_debt, paid_flags_by_debt, paid_amounts_by_debt) in enumerate(monthly_rows, start=1):
             row_vals = [values_by_debt.get(d, 0.0) for d in debts]
             total = sum(row_vals)
-            mixed_paid_status = any(bool(paid_flags_by_debt.get(debt, False)) for debt in debts) and not all(
-                bool(paid_flags_by_debt.get(debt, False)) for debt in debts
-            )
 
             tk.Label(
                 self.rimanenze_table_body, text=month_label, bg=BG_TABLE, fg=FG,
@@ -816,13 +813,12 @@ class DebtsDesktopApp(tk.Tk):
                 cell_label.grid(row=ridx, column=cidx, sticky="nsew")
 
                 paid_amount_for_cell = max(0.0, paid_amounts_by_debt.get(debt, 0.0))
-                if paid_in_month and mixed_paid_status and previous_total is not None and paid_amount_for_cell > 0:
-                    tooltip_value = max(0.0, previous_total - paid_amount_for_cell)
-                    paid_label = "capitale" if scope == "Capitale" else "totale"
-                    tooltip_text = (
-                        f"Totale mese precedente - {paid_label} pagato: "
-                        f"{_format_amount(previous_total)} - {_format_amount(paid_amount_for_cell)} = {_format_amount(tooltip_value)}"
-                    )
+                if paid_in_month and paid_amount_for_cell > 0:
+                    reference_total = previous_total
+                    if reference_total is None:
+                        reference_total = total + sum(max(0.0, paid_amounts_by_debt.get(d, 0.0)) for d in debts)
+                    tooltip_value = max(0.0, reference_total - paid_amount_for_cell)
+                    tooltip_text = f"Totale mancante: {_format_amount(tooltip_value)}"
                     cell_label.bind("<Enter>", lambda event, t=tooltip_text: self._show_hover_tooltip(event, t))
                     cell_label.bind("<Leave>", self._hide_hover_tooltip)
 
