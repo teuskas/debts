@@ -19,7 +19,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Esecuzione
+## Esecuzione CLI (utility Dropbox)
 
 Verifica account:
 
@@ -33,6 +33,35 @@ Elenco root Dropbox:
 python main.py list --path "" --limit 20
 ```
 
+Avvio UI desktop standalone:
+
+```bash
+python main.py ui
+```
+
+La UI desktop contiene tre tab:
+- `Rate annuali`: fogli anno (`YYYY`) del file `RM+RF+RC.ods`
+- `Rate future`: vista del foglio `GenCal` suddivisa per anno tramite righe separatrici grigie
+- `Completamento`: menu a tendina con viste `Per Rate`, `Per Totale`, `Per Capitale`
+
+Con path ODS personalizzato:
+
+```bash
+python main.py ui --path "/Me/DEBITI/RM+RF+RC.ods"
+```
+
+## Parser ODS (standalone)
+
+Smoke test rapido del parser sui fogli annuali di `RM+RF+RC.ods`:
+
+```bash
+python smoke_test.py
+```
+
+Note:
+- percorso predefinito Dropbox: `/Me/DEBITI/RM+RF+RC.ods`
+- esclude `GenCal` e legge solo i fogli anno (`YYYY`)
+
 ## CI (GitHub Actions)
 
 La pipeline in `.github/workflows/ci.yml` esegue su push e pull request verso `main` e `development`:
@@ -42,7 +71,7 @@ La pipeline in `.github/workflows/ci.yml` esegue su push e pull request verso `m
 Verifica locale rapida (opzionale prima del push):
 
 ```bash
-pip install ruff
+pip install -r requirements.txt
 ruff check .
-python -m py_compile auth.py main.py
+python -m py_compile auth.py main.py ods_service.py desktop_app.py smoke_test.py
 ```

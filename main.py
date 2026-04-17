@@ -1,6 +1,7 @@
 import argparse
 
 from auth import get_dropbox_client
+from desktop_app import DEFAULT_DROPBOX_PATH, run_desktop_app
 
 
 def cmd_whoami() -> None:
@@ -36,6 +37,13 @@ def main() -> None:
     list_cmd.add_argument("--path", default="", help="Path Dropbox da elencare (default root)")
     list_cmd.add_argument("--limit", type=int, default=20, help="Massimo elementi da stampare")
 
+    ui_cmd = sub.add_parser("ui", help="Avvia la UI desktop standalone")
+    ui_cmd.add_argument(
+        "--path",
+        default=DEFAULT_DROPBOX_PATH,
+        help="Path Dropbox del file ODS (default /Me/DEBITI/RM+RF+RC.ods)",
+    )
+
     args = parser.parse_args()
 
     if args.command in (None, "whoami"):
@@ -44,6 +52,10 @@ def main() -> None:
 
     if args.command == "list":
         cmd_list(args.path, args.limit)
+        return
+
+    if args.command == "ui":
+        run_desktop_app(dropbox_path=args.path)
         return
 
     parser.print_help()
