@@ -749,7 +749,7 @@ class DebtsDesktopApp(tk.Tk):
                 for debt in debts
             }
 
-        # Per il Capitale usa i file dedicati RMQ/FCQ/FCAR (richiesta utente).
+        # Per il Capitale e Totale usa i file dedicati RMQ/FCQ/FCAR.
         if scope == "Capitale":
             monthly_rows = _extract_monthly_capital_rimanenze_from_dedicated_files(
                 debts,
@@ -758,15 +758,10 @@ class DebtsDesktopApp(tk.Tk):
                 self._capital_file_cache,
             )
         else:
-            # Totale: continua a usare il GenCal.
-            show_full_year = selected_year == str(datetime.now().year)
-            monthly_rows = _extract_monthly_rimanenze(
-                grid,
+            monthly_rows = _extract_monthly_total_rimanenze_from_dedicated_files(
                 debts,
-                scope,
-                initial_remaining,
                 selected_year,
-                fill_full_year=show_full_year,
+                self._capital_file_cache,
             )
 
         if not monthly_rows:
@@ -1798,6 +1793,96 @@ def _extract_monthly_capital_rimanenze_from_dedicated_files(
         result.append((mlabel, row_values, row_flags, row_paid_amounts))
 
     return result
+
+
+def _extract_monthly_total_rimanenze_from_dedicated_files(
+    debts: tuple[str, ...],
+    year: str,
+    capital_file_cache: dict[str, bytes],
+) -> list[tuple[str, dict[str, float], dict[str, bool], dict[str, float]]]:
+    """Estrae le rimanenze mensili 'Totale' dai file dedicati usando la colonna TOT MANCANTE."""
+    month_sequence = _build_month_sequence_for_year(year)
+    if not month_sequence:
+        return []
+
+    tot_mancante_by_debt: dict[str, dict[str, float]] = {debt: {} for debt in debts}
+    paid_flags_by_debt: dict[str, dict[str, bool]] = {debt: {} for debt in debts}
+
+    for debt in debts:
+        dropbox_path = CAPITAL_FILE_BY_TARGET.get(debt)
+        if not dropbox_path:
+            continue
+        try:
+            ods_bytes = _load_dedicated_file_bytes(capital_file_cache, dropbox_path)
+            grid = _load_dedicated_year_grid(ods_bytes, year)
+            amounts, flags = _extract_dedicated_tot_mancante_and_paid_flags(grid, year)
+            tot_mancante_by_debt[debt] = amounts
+            paid_flags_by_debt[debt] = flags
+        except Exception:
+            continue
+
+    result: list[tuple[str, dict[str, float], dict[str, bool], dict[str, float]]] = []
+    for mkey, mlabel in month_sequence:
+        row_values: dict[str, float] = {}
+        row_flags: dict[str, bool] = {}
+        row_paid_amounts: dict[str, float] = {}
+        for debt in debts:
+            amounts = tot_mancante_by_debt.get(debt, {})
+            flags = paid_flags_by_debt.get(debt, {})
+            val = amounts.get(mkey, 0.0)
+            row_values[debt] = val
+            row_flags[debt] = bool(flags.get(mkey, False))
+            row_paid_amounts[debt] = val
+        result.append((mlabel, row_values, row_flags, row_paid_amounts))
+
+    return result
+
+
+def _extract_dedicated_tot_mancante_and_paid_flags(grid: SheetGrid, year: str) -> tuple[dict[str, float], dict[str, bool]]:
+    """Legge la colonna TOT MANCANTE dal file dedicato per ogni mese."""
+    month_idx, tot_manc_idx = _find_dedicated_tot_mancante_columns(grid)
+    if month_idx is None or tot_manc_idx is None:
+        return {}, {}
+
+    month_amounts: dict[str, float] = {}
+    month_paid_flags: dict[str, bool] = {}
+
+    for row in grid.rows:
+        if month_idx >= len(row) or tot_manc_idx >= len(row):
+            continue
+
+        month_raw = row[month_idx].value
+        month_info = _parse_month_key_label(month_raw, fallback_year=year)
+        if month_info is None:
+            continue
+
+        month_key, _ = month_info
+        amount = _safe_extract_amount(row[tot_manc_idx].value)
+        if amount is None or amount < 0:
+            continue
+
+        month_amounts[month_key] = amount
+        month_paid_flags[month_key] = _is_green(row[tot_manc_idx].bg_color) or _is_green(row[month_idx].bg_color)
+
+    return month_amounts, month_paid_flags
+
+
+def _find_dedicated_tot_mancante_columns(grid: SheetGrid) -> tuple[int | None, int | None]:
+    """Trova le colonne MESE e TOT MANCANTE nell'header del file dedicato."""
+    for row in grid.rows[:8]:
+        month_idx = None
+        tot_manc_idx = None
+        for cidx, cell in enumerate(row):
+            label = _normalize_label(cell.value)
+            if not label:
+                continue
+            if month_idx is None and "MESE" in label:
+                month_idx = cidx
+            if tot_manc_idx is None and "TOT" in label and "MANC" in label:
+                tot_manc_idx = cidx
+        if month_idx is not None and tot_manc_idx is not None:
+            return month_idx, tot_manc_idx
+    return None, None
 
 
 def _load_dedicated_file_bytes(capital_file_cache: dict[str, bytes], dropbox_path: str) -> bytes:
